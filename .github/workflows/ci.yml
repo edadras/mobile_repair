@@ -21,3 +21,4 @@ jobs:
       - run: pytest -q
       - run: mrt --help
       - run: python -m mrt --dry-run --no-log -s DUMMY fastboot getvar all
+      - run: python -m mrt --dry-run --no-log -s DUMMY efs detect

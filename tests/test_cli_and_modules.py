@@ -180,12 +180,16 @@ def test_menu_runs_command(capsys):
 
 
 def test_every_subcommand_has_handler():
+    import argparse
+
     parser = cli.build_parser()
-    groups = parser._subparsers._group_actions[0].choices
-    for name, sub in groups.items():
-        actions = [a for a in sub._actions if isinstance(a, type(parser._subparsers._group_actions[0]))]
-        if not actions:
-            assert sub.get_default("func") is not None, name
-            continue
-        for cname, csub in actions[0].choices.items():
-            assert csub.get_default("func") is not None, f"{name} {cname}"
+
+    def check(p):
+        subs = [a for a in p._actions if isinstance(a, argparse._SubParsersAction)]
+        if not subs:
+            assert p.get_default("func") is not None, p.prog
+            return
+        for name, sp in subs[0].choices.items():
+            check(sp)
+
+    check(parser)

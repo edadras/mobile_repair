@@ -89,3 +89,54 @@ mrt logs collect ./diag         # send the folder to a colleague
 * برای پارتیشن‌های داینامیک (system/vendor/product) در حالت fastboot باید در **fastbootd** باشید؛ `rom flash-dir` این کار را خودکار انجام می‌دهد.
 
 </div>
+
+<div dir="rtl">
+
+## EFS / NV و هویت مودم (IMEI/سیم شناسایی نمی‌شود)
+
+**قبل از هر کاری** گروه EFS/NV را اتمیک بکاپ بگیرید (روت لازم است):
+
+</div>
+
+```bash
+mrt efs detect                       # چیپست و پارتیشن‌های موجود
+mrt efs backup backups/efs-<sn>      # Qualcomm: modemst1+modemst2+fsg+fsc | MTK: nvram+nvdata+nvcfg+protect | Samsung: efs + /efs
+mrt efs validate                     # آیا modemst1/2 خالی/erased شده؟ آینه‌ها یکسان‌اند؟
+```
+
+<div dir="rtl">
+
+**بازگردانی بعد از خرابی EFS (سیم‌کارت شناسایی نمی‌شود، IMEI صفر):**
+
+</div>
+
+```bash
+mrt efs restore backups/efs-<sn>     # همهٔ گروه با هم (مدیریت آینه + rollback خودکار)، سپس ریبوت
+```
+
+<div dir="rtl">
+
+**نکات مهم و صادقانه:**
+
+* `modemst1` و `modemst2` یک **جفت آینه** هستند و `fsg` نسخهٔ کارخانه است. اگر فقط یکی را برگردانید، مودم ممکن است از دیگری بازسازی کند و تغییر شما گم شود؛ ابزار در این حالت هشدار می‌دهد. همیشه کل گروه را با هم برگردانید.
+* برای `modemst`/`nvram` **چک‌سام سطح‌پارتیشن قابل بازمحاسبه وجود ندارد**؛ اینها فایل‌سیستم داخلی مبهم (EFS2/NVRAM) هستند. راه درست، بازگردانی اتمیک از دامپ سالمِ **همان دستگاه** است، نه ویرایش دستی و «اصلاح CRC».
+* برای **سامسونگ**، بعد از دستکاری `/efs`، سایدکار md5 را اصلاح کنید وگرنه مودم `nv_data.bin` را رد می‌کند:
+
+</div>
+
+```bash
+mrt efs samsung-fix-md5              # روی دستگاه (روت) - یا --local DIR روی یک کپی
+```
+
+<div dir="rtl">
+
+**کار با QCN (بکاپ QPST):** خواندن/استخراج/ویرایش **آفلاین** پشتیبانی می‌شود، اما **نوشتن QCN روی مودم از طریق adb ممکن نیست** و به پورت DIAG و QPST/QFIL نیاز دارد.
+
+</div>
+
+```bash
+mrt efs qcn info modem.qcn
+mrt efs qcn extract modem.qcn --out qcn_items
+mrt efs qcn edit modem.qcn 550 --value 00112233 --out modem_new.qcn
+mrt efs qcn diff modem.qcn modem_new.qcn
+```

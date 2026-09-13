@@ -17,7 +17,7 @@ from .core.errors import MrtError
 from .core.oplog import OperationLog
 from .core.output import emit, human_size, info, parse_size, print_table, warn
 from .core.runner import Runner
-from .core.safety import Safety
+from .core.safety import CRITICAL, DESTRUCTIVE, NOTICE, Safety
 from .modules import apps as apps_mod
 from .modules import backup as backup_mod
 from .modules import fastboot_ops
@@ -27,6 +27,9 @@ from .modules import logs as logs_mod
 from .modules import partitions as part_mod
 from .modules import recovery as recovery_mod
 from .modules import screen as screen_mod
+from .modules import efs as efs_mod
+from .utils import qcn as qcn_mod
+from .utils import nvchecksum as nvchecksum_mod
 
 
 def _out(ctx: Context, data: Any) -> None:
@@ -497,6 +500,186 @@ def screen_unlock(ctx, args):
     _out(ctx, screen_mod.unlock_screen(ctx.adb(), args.pin))
 
 
+# =========================================================================== efs
+
+
+def efs_detect(ctx, args):
+    dev = ctx.adb()
+    chipset = efs_mod.detect_chipset(dev)
+    data = {"chipset": chipset, "groups": {}}
+    for group in efs_mod.GROUPS.get(chipset, efs_mod.GROUPS[efs_mod.UNKNOWN]):
+        parts = efs_mod.resolve_group(dev, chipset, group)
+        data["groups"][group] = [{"name": p.name, "size": p.size_h, "device": p.device} for p in parts]
+    _out(ctx, data)
+
+
+def efs_backup(ctx, args):
+    out_dir = args.directory or os.path.join("backups", "efs-" + time.strftime("%Y%m%d-%H%M%S"))
+    _out(ctx, efs_mod.backup(ctx.adb(), out_dir, ctx.safety, group=args.group, chipset=args.chipset,
+                             include_efs_fs=not args.no_efs_fs))
+
+
+def efs_restore(ctx, args):
+    _out(ctx, efs_mod.restore(ctx.adb(), args.directory, ctx.safety, group=args.group,
+                              partitions=_csv(args.partitions), rollback=not args.no_rollback))
+
+
+def efs_validate(ctx, args):
+    _out(ctx, efs_mod.validate(ctx.adb(), chipset=args.chipset, group=args.group))
+
+
+def efs_samsung_fix_md5(ctx, args):
+    dev = None if args.local else ctx.adb()
+    _out(ctx, efs_mod.samsung_fix_md5(dev, ctx.safety, efs_dir=args.efs_dir, local_dir=args.local, create=args.create))
+
+
+def efs_qcn_info(ctx, args):
+    q = qcn_mod.Qcn.load(args.file)
+    data = {"file": args.file}
+    data.update(q.metadata())
+    data["nv_items"] = sorted((it.storage + "/" + it.item) for it in q.nv_items())
+    if ctx.json:
+        _out(ctx, data)
+        return
+    print(f"file: {args.file}")
+    print(f"storages: {', '.join(data['storages'])}")
+    print(f"NV item count: {data['nv_item_count']}")
+    for k in ("Version", "File_Version", "Mobile_Property"):
+        if k in data:
+            print(f"{k}: {data[k]}")
+    print("items:")
+    for it in q.items():
+        print(f"  {it.storage}/{it.item}  ({len(it.value)} bytes)")
+
+
+def efs_qcn_extract(ctx, args):
+    q = qcn_mod.Qcn.load(args.file)
+    if args.item is not None:
+        it = q.get(args.item, storage=args.storage)
+        if not it:
+            raise MrtError(f"item {args.item} not found")
+        if args.out:
+            Path(args.out).write_bytes(it.value)
+            _out(ctx, {"item": it.item, "storage": it.storage, "bytes": len(it.value), "file": args.out})
+        else:
+            _out(ctx, {"item": it.item, "storage": it.storage, "hex": it.value.hex(),
+                       "ascii": it.value.decode("latin-1")})
+        return
+    out_dir = Path(args.out or "qcn_items")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    exported = []
+    for it in q.items():
+        sub = out_dir / it.storage
+        sub.mkdir(exist_ok=True)
+        (sub / it.item).write_bytes(it.value)
+        exported.append(f"{it.storage}/{it.item}")
+    (out_dir / "index.json").write_text(json.dumps({"file": args.file, "items": exported, "meta": q.metadata()}, indent=2, default=str), encoding="utf-8")
+    _out(ctx, {"exported": len(exported), "dir": str(out_dir)})
+
+
+def efs_qcn_edit(ctx, args):
+    if args.value is not None:
+        value = bytes.fromhex(args.value.replace(" ", ""))
+    elif args.value_ascii is not None:
+        value = args.value_ascii.encode("latin-1")
+    elif args.value_file is not None:
+        value = Path(args.value_file).read_bytes()
+    else:
+        raise MrtError("provide --value HEX, --value-ascii STR or --value-file FILE")
+    preview = value.hex()[:48]
+    ctx.safety.confirm(
+        f"Edit NV item {args.item} in {args.file} to {len(value)} bytes ({preview})\n"
+        "This edits the QCN file only. Writing it back to the modem needs QPST/QFIL over a DIAG port.",
+        level=DESTRUCTIVE)
+    if args.rebuild:
+        q = qcn_mod.Qcn.load(args.file)
+        q.set(args.item, value, storage=args.storage or "NV_ITEM_ARRAY")
+        q.save(args.out or args.file)
+        _out(ctx, {"item": str(args.item), "bytes": len(value), "file": args.out or args.file, "method": "rebuild"})
+    else:
+        if args.out and args.out != args.file:
+            import shutil
+            shutil.copyfile(args.file, args.out)
+        qcn_mod.edit_item_inplace(args.out or args.file, args.item, value, storage=args.storage)
+        _out(ctx, {"item": str(args.item), "bytes": len(value), "file": args.out or args.file, "method": "in-place"})
+
+
+def efs_qcn_diff(ctx, args):
+    a = {f"{i.storage}/{i.item}": i.value for i in qcn_mod.Qcn.load(args.a).items()}
+    b = {f"{i.storage}/{i.item}": i.value for i in qcn_mod.Qcn.load(args.b).items()}
+    only_a = sorted(set(a) - set(b))
+    only_b = sorted(set(b) - set(a))
+    changed = sorted(k for k in set(a) & set(b) if a[k] != b[k])
+    _out(ctx, {"only_in_a": only_a, "only_in_b": only_b, "changed": changed,
+               "changed_detail": {k: {"a": a[k].hex(), "b": b[k].hex()} for k in changed[:50]}})
+
+
+def efs_nvcrc(ctx, args):
+    data = Path(args.file).read_bytes() if args.file else bytes.fromhex(args.hex.replace(" ", ""))
+    _out(ctx, {"bytes": len(data), "crc16_x25": f"0x{nvchecksum_mod.crc16_x25(data):04x}",
+               "md5": nvchecksum_mod.samsung_md5_hex(data)})
+
+
+def _build_efs(sub):
+    g = sub.add_parser("efs", aliases=["nv"], help="EFS / NV (IMEI, calibration) backup, restore, QCN, checksums")
+    s = g.add_subparsers(dest="command", metavar="<command>")
+    s.required = True
+    s.add_parser("detect", help="detect chipset and list EFS/NV partitions that exist").set_defaults(func=efs_detect)
+    x = s.add_parser("backup", help="atomic backup of the EFS/NV partition group (root)")
+    x.add_argument("directory", nargs="?", help="output dir (default backups/efs-<timestamp>)")
+    x.add_argument("--group", default="modem-nv", help="modem-nv (default), persist, modem-fw")
+    x.add_argument("--chipset", default="auto", choices=["auto", "qualcomm", "mediatek", "samsung", "unknown"])
+    x.add_argument("--no-efs-fs", action="store_true", help="skip pulling the Samsung /efs filesystem")
+    x.set_defaults(func=efs_backup)
+    x = s.add_parser("restore", help="atomic restore of the EFS/NV group with mirror handling (root)")
+    x.add_argument("directory")
+    x.add_argument("--group", help="limit to this group")
+    x.add_argument("--partitions", help="comma separated subset to restore")
+    x.add_argument("--no-rollback", action="store_true", help="do not dump current content before writing")
+    x.set_defaults(func=efs_restore)
+    x = s.add_parser("validate", help="check erased/mirror state and Samsung md5 sidecars (root)")
+    x.add_argument("--group", default="modem-nv")
+    x.add_argument("--chipset", default="auto", choices=["auto", "qualcomm", "mediatek", "samsung", "unknown"])
+    x.set_defaults(func=efs_validate)
+    x = s.add_parser("samsung-fix-md5", help="recompute Samsung nv_data.bin.md5 sidecars")
+    x.add_argument("--efs-dir", help="device /efs dir (auto-detected)")
+    x.add_argument("--local", help="fix a pulled copy in this local directory instead of the device")
+    x.add_argument("--create", action="store_true", help="also create missing sidecars for known files")
+    x.set_defaults(func=efs_samsung_fix_md5)
+    x = s.add_parser("nv-crc", help="compute DIAG CRC-16/X-25 and MD5 of a value")
+    x.add_argument("--hex", help="value as hex")
+    x.add_argument("--file", help="value from a file")
+    x.set_defaults(func=efs_nvcrc)
+
+    q = s.add_parser("qcn", help="offline QCN (QPST backup) inspect/extract/edit")
+    qs = q.add_subparsers(dest="qcn_command", metavar="<command>")
+    qs.required = True
+    x = qs.add_parser("info", help="list storages and NV items in a QCN")
+    x.add_argument("file")
+    x.set_defaults(func=efs_qcn_info)
+    x = qs.add_parser("extract", help="extract one item or all items")
+    x.add_argument("file")
+    x.add_argument("--item", help="a single NV item number")
+    x.add_argument("--storage", help="restrict to a storage name")
+    x.add_argument("--out", help="output file (single item) or directory (all)")
+    x.set_defaults(func=efs_qcn_extract)
+    x = qs.add_parser("edit", help="edit an NV item value inside the QCN (offline)")
+    x.add_argument("file")
+    x.add_argument("item")
+    x.add_argument("--value", help="new value as hex")
+    x.add_argument("--value-ascii", help="new value as ascii text")
+    x.add_argument("--value-file", help="new value from a file")
+    x.add_argument("--storage", help="storage name (default NV_ITEM_ARRAY on rebuild)")
+    x.add_argument("--out", help="write to a new file instead of in place")
+    x.add_argument("--rebuild", action="store_true", help="rebuild the container (needed if length changes)")
+    x.set_defaults(func=efs_qcn_edit)
+    x = qs.add_parser("diff", help="compare NV items of two QCN files")
+    x.add_argument("a")
+    x.add_argument("b")
+    x.set_defaults(func=efs_qcn_diff)
+
+
+
 def cmd_menu(ctx, args):
     from .menu import run_menu
 
@@ -564,6 +747,7 @@ def build_parser() -> argparse.ArgumentParser:
     _build_apps(sub)
     _build_logs(sub)
     _build_screen(sub)
+    _build_efs(sub)
     return p
 
 

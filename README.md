@@ -13,6 +13,7 @@
 | **بکاپ/ری‌استور** | APKها (با split)، دیتای برنامه‌ها (`adb backup`)، حافظهٔ داخلی، ایمیج پارتیشن‌های حیاتی (EFS/modem/persist/NV/boot…) یا همهٔ پارتیشن‌ها؛ ری‌استور و بررسی سلامت با هش |
 | **فلش رام** | شناسایی نوع رام، فلش پوشهٔ ایمیج‌های fastboot با ترتیب درست و جابه‌جایی خودکار به fastbootd، **استخراج و فلش `payload.bin`** (بدون کتابخانهٔ خارجی)، `fastboot update`، sideload |
 | **ریکاوری** | ریبوت به هر حالت (recovery/bootloader/fastbootd/sideload/EDL/download)، sideload، wipe cache/data، فکتوری‌ریست، فلش ریکاوری کاستوم، push فایل، دستورات TWRP |
+| **EFS / NV** | شناسایی چیپست، بکاپ/ری‌استور **اتمیک** گروه هویت مودم (Qualcomm: modemst1/modemst2/fsg/fsc با مدیریت آینه، MediaTek: nvram/nvdata/nvcfg/protect، Samsung: efs + فایل‌سیستم /efs)، بازمحاسبهٔ `nv_data.bin.md5` سامسونگ، خواندن/استخراج/ویرایش آفلاین آیتم‌های NV در فایل **QCN**، محاسبهٔ CRC-16/X-25 و MD5 |
 | **مدیریت اپ** | لیست/اطلاعات/نصب/حذف/غیرفعال/فعال/پاک کردن دیتا/استخراج APK/بکاپ‌وری‌استور دیتا/مجوزها/حذف بلوت‌ویر گروهی بدون روت |
 | **لاگ** | logcat (فایل یا زنده)، dmesg، pstore/last_kmsg (لاگ کرش بوت قبلی)، bugreport، dumpsys، ANR/tombstone/dropbox، دلیل بوت، بستهٔ کامل تشخیصی |
 | **صفحه** | اسکرین‌شات، ضبط، تزریق لمس/کلید/متن، تست تاچ، بیدار/آنلاک کردن |
@@ -87,6 +88,16 @@ mrt apps debloat scripts/debloat-example.txt --mode uninstall
 mrt logs collect ./diag
 mrt logs last-kmsg ./crash
 mrt logs logcat -f '*:E'
+```
+
+# EFS / NV (هویت مودم: IMEI، MAC، کالیبراسیون) - نیاز به روت
+mrt efs detect
+mrt efs backup backups/efs-c1                 # بکاپ اتمیک گروه (Qualcomm/MTK/Samsung خودکار)
+mrt efs validate                              # وضعیت آینه modemst1/2 و md5 سامسونگ
+mrt efs restore backups/efs-c1                # ری‌استور اتمیک با rollback خودکار
+mrt efs samsung-fix-md5                        # اصلاح nv_data.bin.md5 سامسونگ
+mrt efs qcn info backup.qcn                    # لیست آیتم‌های NV داخل QCN
+mrt efs qcn edit backup.qcn 550 --value-ascii "12345"   # ویرایش آفلاین آیتم NV
 ```
 
 <div dir="rtl">

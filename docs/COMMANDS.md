@@ -132,3 +132,27 @@ Exit codes: 0 ok · 1 generic · 2 tool not found · 3 device not found · 4 com
 ## Operation log
 
 `~/.mrt/logs/mrt-YYYYMMDD-HHMMSS.log` (text) and `.jsonl` (one JSON object per event: `command` with argv/rc/duration/stderr, `info`, `warn`, `error`, confirmations and their outcome). Use `--log-dir` or `MRT_LOG_DIR` to change the location.
+
+## `mrt efs` (alias `nv`) — EFS / NV: IMEI, MAC, RF calibration
+
+These partitions carry radio identity. Handle them as one atomic group; back up before touching anything. Partition operations need root.
+
+| command | description |
+|---|---|
+| `detect` | detect chipset (Qualcomm/MediaTek/Samsung) and list which EFS/NV partitions exist per group |
+| `backup [DIR] [--group modem-nv|persist|modem-fw] [--chipset auto|qualcomm|mediatek|samsung] [--no-efs-fs]` | dump the whole group hash-verified into `DIR` with `efs-manifest.json`; on Samsung also tars `/efs`. Default group `modem-nv` = Qualcomm `modemst1,modemst2,fsg,fsc` / MediaTek `nvram,nvdata,nvcfg,protect1,protect2` / Samsung `efs,sec_efs,cpefs,…` |
+| `restore DIR [--group G] [--partitions a,b] [--no-rollback]` | atomic restore. Guards against a different device model (token `MISMATCH`), warns if you restore only one of the `modemst1`/`modemst2` mirror pair or omit `fsg`, dumps current content to a `rollback-*` folder first, writes each image with `part write` (size + hash verified), token `RESTORE` |
+| `validate [--group G] [--chipset C]` | per-partition state (populated vs erased/empty), `modemst1` vs `modemst2` mirror comparison, Samsung md5-sidecar status, and a note that EFS2/NVRAM have no recomputable partition checksum |
+| `samsung-fix-md5 [--efs-dir /efs] [--local DIR] [--create]` | recompute Samsung `nv_data.bin.md5` (and `.nv_data.bak.md5`, …) so the sidecar matches the current binary. Device mode rewrites sidecars as the base file's owner; `--local` fixes a pulled copy on the host; `--create` also creates missing sidecars for known files |
+| `nv-crc [--hex H | --file F]` | compute the DIAG CRC-16/X-25 and MD5 of a value |
+| `qcn info FILE` | list storages and NV items inside a QCN (QPST backup) |
+| `qcn extract FILE [--item N] [--storage S] [--out FILE|DIR]` | extract one item (to file or hex/ascii) or every item into a directory |
+| `qcn edit FILE ITEM (--value HEX | --value-ascii STR | --value-file F) [--storage S] [--out FILE2] [--rebuild]` | edit an NV item value **inside the QCN file**. Same length → safe in-place byte edit (whole container preserved); different length or new item → `--rebuild`. Token: destructive confirm |
+| `qcn diff A B` | compare the NV items of two QCN files (added/removed/changed) |
+
+### What is and isn't a real checksum fix
+
+* **Samsung `nv_data.bin.md5`** is a genuine, documented, recomputable checksum — `samsung-fix-md5` regenerates it correctly.
+* **QCN** streams hold *raw* NV values; `qcn edit` rewrites them and (for length changes) rebuilds a valid Compound File. The DIAG per-item CRC-16 is a wire checksum applied when writing to the modem, not stored in the QCN, so no checksum needs "fixing" inside the file.
+* **Qualcomm `modemst1/2`/`fsg` and MediaTek `nvram`/`nvdata`** are opaque EFS2 / NVRAM filesystems with internal, non-user-recomputable integrity data. There is no partition-level CRC to recalculate; editing the image by hand and "fixing the checksum" is not a real operation. The correct repair is `efs restore` of the whole group (all mirrors together) from a good dump of the **same** device.
+* **Writing NV items or a QCN back onto the modem** requires a DIAG port (QPST/QFIL). It cannot be done over adb; `mrt` edits QCN files offline and restores partitions with `dd`, it does not talk the DIAG protocol.

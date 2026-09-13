@@ -234,6 +234,13 @@ class AdbDevice:
         m = re.search(r"\b([0-9a-fA-F]{64})\b", res.text)
         return m.group(1).lower() if m else None
 
+    def remote_md5(self, path: str, root: bool = True, length: Optional[int] = None) -> Optional[str]:
+        q = shlex.quote(path)
+        cmd = f"head -c {int(length)} {q} | md5sum" if length is not None else f"md5sum {q}"
+        res = self.root_shell(cmd, timeout=3600) if root else self.shell(cmd, timeout=3600)
+        m = re.search(r"\b([0-9a-fA-F]{32})\b", res.text)
+        return m.group(1).lower() if m else None
+
     def remote_size(self, path: str, root: bool = True) -> Optional[int]:
         q = shlex.quote(path)
         cmd = f"blockdev --getsize64 {q} 2>/dev/null || stat -c %s {q} 2>/dev/null || wc -c < {q}"

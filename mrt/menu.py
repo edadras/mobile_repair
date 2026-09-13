@@ -79,6 +79,17 @@ MENU = [
         ("Pull APK", "استخراج APK", "apps pull {package}"),
         ("Debloat from list file", "حذف بلوت‌ویر از فایل لیست", "apps debloat {path}"),
     ]),
+    ("EFS / NV (IMEI, calibration)", "EFS / NV (آی‌ام‌ای، کالیبراسیون)", [
+        ("Detect chipset & partitions", "شناسایی چیپست و پارتیشن‌ها", "efs detect"),
+        ("Backup modem NV (atomic)", "بکاپ اتمیک EFS/NV", "efs backup {directory}"),
+        ("Restore modem NV (atomic)", "ری‌استور اتمیک EFS/NV", "efs restore {directory}"),
+        ("Validate EFS/NV state", "بررسی وضعیت EFS/NV", "efs validate"),
+        ("Samsung: fix nv_data md5", "سامسونگ: اصلاح md5", "efs samsung-fix-md5"),
+        ("QCN: list NV items", "QCN: لیست آیتم‌های NV", "efs qcn info {path}"),
+        ("QCN: extract items", "QCN: استخراج آیتم‌ها", "efs qcn extract {path} --out {directory}"),
+        ("QCN: edit an NV item", "QCN: ویرایش آیتم NV", "efs qcn edit {path} {args}"),
+        ("Compute NV CRC / md5", "محاسبه CRC/md5", "efs nv-crc --hex {args}"),
+    ]),
     ("Logs", "لاگ‌ها", [
         ("Collect full diagnostics bundle", "جمع‌آوری کامل لاگ‌ها", "logs collect"),
         ("Logcat to file", "ذخیره logcat", "logs logcat -o {output}"),
