@@ -101,7 +101,10 @@ mrt logs collect ./diag         # send the folder to a colleague
 ```bash
 mrt efs detect                       # چیپست و پارتیشن‌های موجود
 mrt efs backup backups/efs-<sn>      # Qualcomm: modemst1+modemst2+fsg+fsc | MTK: nvram+nvdata+nvcfg+protect | Samsung: efs + /efs
-mrt efs validate                     # آیا modemst1/2 خالی/erased شده؟ آینه‌ها یکسان‌اند؟
+mrt efs validate                     # آیا modemst1/2 خالی/erased شده؟ آینه‌ها یکسان‌اند؟ ساختار داخلی (EFS2 / ext4 / nvram) سالم است؟
+mrt efs check-image backups/efs-<sn> # همان بررسی ساختار، آفلاین روی دامپ‌ها
+mrt efs rebuild-modemst              # Qualcomm: پاک کردن modemst1/2 تا مودم آن‌ها را از fsg بازسازی کند (بعد از بکاپ و بررسی fsg)
+mrt efs mtk-rebuild-nvdata           # MediaTek: خالی کردن nvdata تا nvram_daemon آن را از بکاپ nvram بازسازی کند (بعد از بکاپ و بررسی nvram)
 ```
 
 <div dir="rtl">
@@ -119,7 +122,7 @@ mrt efs restore backups/efs-<sn>     # همهٔ گروه با هم (مدیریت
 **نکات مهم و صادقانه:**
 
 * `modemst1` و `modemst2` یک **جفت آینه** هستند و `fsg` نسخهٔ کارخانه است. اگر فقط یکی را برگردانید، مودم ممکن است از دیگری بازسازی کند و تغییر شما گم شود؛ ابزار در این حالت هشدار می‌دهد. همیشه کل گروه را با هم برگردانید.
-* برای `modemst`/`nvram` **چک‌سام سطح‌پارتیشن قابل بازمحاسبه وجود ندارد**؛ اینها فایل‌سیستم داخلی مبهم (EFS2/NVRAM) هستند. راه درست، بازگردانی اتمیک از دامپ سالمِ **همان دستگاه** است، نه ویرایش دستی و «اصلاح CRC».
+* برای `modemst`/`fsg` (EFS2) و `nvram`/`nvdata` (بکاپ nvram_daemon / ext4) **چک‌سامی که با دست بازمحاسبه شود وجود ندارد**: سوپربلاک EFS2 اصلاً فیلد CRC ندارد و ext4 چک‌سام‌هایش را خود کرنل می‌نویسد. «بازمحاسبهٔ چک‌سام داخلی» در عمل یعنی وادار کردن خودِ فریم‌ور به بازسازی: `efs rebuild-modemst` مودم کوالکام را وامی‌دارد modemst1/2 را از `fsg` بسازد و `efs mtk-rebuild-nvdata` باعث می‌شود nvram_daemon مدیاتک nvdata را از بکاپ `nvram` برگرداند. هر دو اول بکاپ می‌گیرند و اگر نسخهٔ مبدأ (fsg / بکاپ nvram) معتبر نباشد، اجرا نمی‌شوند. `efs validate` و `efs check-image` ساختار داخلی (سوپربلاک‌ها، سن (age) نسخهٔ زنده، هندسه، هدر بکاپ) را بررسی می‌کنند. در غیر این صورت راه درست، بازگردانی اتمیک از دامپ سالمِ **همان دستگاه** است.
 * برای **سامسونگ**، بعد از دستکاری `/efs`، سایدکار md5 را اصلاح کنید وگرنه مودم `nv_data.bin` را رد می‌کند:
 
 </div>

@@ -525,7 +525,19 @@ def efs_restore(ctx, args):
 
 
 def efs_validate(ctx, args):
-    _out(ctx, efs_mod.validate(ctx.adb(), chipset=args.chipset, group=args.group))
+    _out(ctx, efs_mod.validate(ctx.adb(), chipset=args.chipset, group=args.group, deep=not args.no_deep))
+
+
+def efs_check_image(ctx, args):
+    _out(ctx, efs_mod.check_images(args.paths))
+
+
+def efs_rebuild_modemst(ctx, args):
+    _out(ctx, efs_mod.rebuild_modemst(ctx.adb(), ctx.safety, backup_dir=args.backup_dir, reboot=args.reboot))
+
+
+def efs_mtk_rebuild_nvdata(ctx, args):
+    _out(ctx, efs_mod.mtk_rebuild_nvdata(ctx.adb(), ctx.safety, backup_dir=args.backup_dir, reboot=args.reboot))
 
 
 def efs_samsung_fix_md5(ctx, args):
@@ -637,10 +649,22 @@ def _build_efs(sub):
     x.add_argument("--partitions", help="comma separated subset to restore")
     x.add_argument("--no-rollback", action="store_true", help="do not dump current content before writing")
     x.set_defaults(func=efs_restore)
-    x = s.add_parser("validate", help="check erased/mirror state and Samsung md5 sidecars (root)")
+    x = s.add_parser("validate", help="check erased/mirror state, EFS2/ext4/nvram structure and Samsung md5 sidecars (root)")
     x.add_argument("--group", default="modem-nv")
     x.add_argument("--chipset", default="auto", choices=["auto", "qualcomm", "mediatek", "samsung", "unknown"])
+    x.add_argument("--no-deep", action="store_true", help="skip dumping partitions for the internal structure check")
     x.set_defaults(func=efs_validate)
+    x = s.add_parser("check-image", help="offline structure check of dumped modemst/fsg (EFS2), nvdata (ext4), nvram images")
+    x.add_argument("paths", nargs="+", help="image files and/or mrt EFS backup directories")
+    x.set_defaults(func=efs_check_image)
+    x = s.add_parser("rebuild-modemst", help="Qualcomm: erase modemst1/2 so the modem rebuilds them from fsg (backup + fsg check first, root)")
+    x.add_argument("--backup-dir", help="where to store the mandatory pre-rebuild backup")
+    x.add_argument("--reboot", action="store_true", help="reboot immediately after erasing")
+    x.set_defaults(func=efs_rebuild_modemst)
+    x = s.add_parser("mtk-rebuild-nvdata", help="MediaTek: empty nvdata so nvram_daemon restores it from the nvram backup (backup + check first, root)")
+    x.add_argument("--backup-dir", help="where to store the mandatory pre-rebuild backup")
+    x.add_argument("--reboot", action="store_true", help="reboot immediately after emptying nvdata")
+    x.set_defaults(func=efs_mtk_rebuild_nvdata)
     x = s.add_parser("samsung-fix-md5", help="recompute Samsung nv_data.bin.md5 sidecars")
     x.add_argument("--efs-dir", help="device /efs dir (auto-detected)")
     x.add_argument("--local", help="fix a pulled copy in this local directory instead of the device")
