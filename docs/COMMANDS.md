@@ -147,6 +147,35 @@ Host-driven version of what the Magisk app does. Needs the Magisk APK on the hos
 
 Samsung: `patch` works (use `--recovery-mode` / `--patch-vbmeta` as the Magisk docs describe for the model), but the flash step must be done with Odin (AP tar) — `flash` refuses on Samsung.
 
+## `mrt imei` — IMEI service layer
+
+A single front end that selects the chipset backend and knows its transport and storage:
+
+```
+                     IMEI Service Layer
+                             │
+       ┌─────────────────────┼─────────────────────┐
+       ↓                     ↓                     ↓
+   Qualcomm                 MTK                 Samsung
+     DIAG                  META                Service/AT
+       │                     │                     │
+       ↓                     ↓                     ↓
+     NV/QCN            NVRAM/NVDATA               EFS/NV
+```
+
+Reading works over adb (Android telephony) and offline (QCN NV item 550). A **live write** needs the chipset's proprietary port (Qualcomm DIAG, MediaTek META, or the modem AT channel), none reachable over adb — so `mrt` writes the IMEI **offline inside a QCN** (restore with QPST) and, for a live write, emits the exact payload. Writing an IMEI is a licensed repair operation to restore a device's own number; the number is always supplied and Luhn-validated, never invented.
+
+| command | description |
+|---|---|
+| `layers [--chipset C] [--device]` | print the transport/storage map; `--device` detects the chipset from the phone |
+| `read [--chipset C]` | live IMEI through the selected layer (Android telephony), with chipset/transport/storage reported |
+| `check IMEI` | validate a 15-digit IMEI (Luhn) or complete a 14-digit one |
+| `encode IMEI` | show the NV_UE_IMEI (item 550) value, the DIAG write frame and the AT+EGMR command |
+| `decode HEX` | decode a packed NV_UE_IMEI value back to an IMEI |
+| `plan-write IMEI [--chipset C] [--sim 1\|2]` | the transport payload for a live write (DIAG frame / NVRAM value / AT command) — does not send anything |
+| `qcn-read FILE [--item N] [--storage S]` | read the IMEI from NV item 550 in a QCN (offline) |
+| `qcn-write FILE IMEI [--item N] [--storage S] [--out FILE2]` | write the IMEI into NV item 550 in a QCN, preserving the stream length. Token `IMEI`. Flash the QCN back with QPST/QFIL |
+
 ## `mrt efs` (alias `nv`) — EFS / NV: IMEI, MAC, RF calibration
 
 These partitions carry radio identity. Handle them as one atomic group; back up before touching anything. Partition operations need root.

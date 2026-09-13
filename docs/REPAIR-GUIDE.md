@@ -160,3 +160,18 @@ mrt efs qcn extract modem.qcn --out qcn_items
 mrt efs qcn edit modem.qcn 550 --value 00112233 --out modem_new.qcn
 mrt efs qcn diff modem.qcn modem_new.qcn
 ```
+
+<div dir="rtl">
+
+### IMEI (لایهٔ سرویس)
+
+`mrt imei` بسته به چیپست مسیر درست را انتخاب می‌کند: کوالکام از DIAG روی NV/QCN، مدیاتک از META روی NVRAM/NVDATA، سامسونگ از AT/سرویس روی EFS/NV.
+
+* خواندن: `mrt imei read` (زنده) یا `mrt imei qcn-read backup.qcn` (آفلاین از آیتم NV 550).
+* اعتبارسنجی: `mrt imei check 3532831100000xx` — رقم کنترل Luhn را بررسی/تکمیل می‌کند.
+* بازگردانی IMEI *خودِ دستگاه* بعد از تعویض برد: `mrt imei qcn-write backup.qcn <imei>` سپس QCN را با QPST روی مودم بازگردانید. توکن: `IMEI`.
+* نوشتن زنده: `mrt imei plan-write <imei>` فریم DIAG یا فرمان `AT+EGMR` را می‌سازد؛ ارسال آن نیازمند پورت اختصاصی (QPST/QFIL، META، یا پورت AT مودم) است و از adb ممکن نیست.
+
+نوشتن IMEI فقط برای بازگردانی شمارهٔ اصلی همان دستگاه مجاز است؛ ابزار هرگز شمارهٔ جعلی نمی‌سازد.
+
+</div>

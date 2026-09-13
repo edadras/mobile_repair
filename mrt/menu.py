@@ -88,6 +88,14 @@ MENU = [
         ("Patch + flash (install)", "پچ و فلش (نصب کامل)", "root install --magisk {path} --boot-image {image}"),
         ("Unroot (restore stock boot)", "حذف روت (بازگردانی بوت اصلی)", "root unroot {directory}"),
     ]),
+    ("IMEI service layer", "لایهٔ سرویس IMEI", [
+        ("Layer map (transport/storage)", "نقشهٔ لایه‌ها", "imei layers --device"),
+        ("Read live IMEI", "خواندن IMEI زنده", "imei read"),
+        ("Validate / complete IMEI", "بررسی/تکمیل IMEI", "imei check {args}"),
+        ("Plan a live write (payload)", "ساخت payload نوشتن", "imei plan-write {args}"),
+        ("Read IMEI from a QCN", "خواندن IMEI از QCN", "imei qcn-read {path}"),
+        ("Write IMEI into a QCN (offline)", "نوشتن IMEI در QCN", "imei qcn-write {path} {args}"),
+    ]),
     ("EFS / NV (IMEI, calibration)", "EFS / NV (آی‌ام‌ای، کالیبراسیون)", [
         ("Detect chipset & partitions", "شناسایی چیپست و پارتیشن‌ها", "efs detect"),
         ("Backup modem NV (atomic)", "بکاپ اتمیک EFS/NV", "efs backup {directory}"),

@@ -29,6 +29,8 @@ from .modules import recovery as recovery_mod
 from .modules import screen as screen_mod
 from .modules import efs as efs_mod
 from .modules import rooting as root_mod
+from .modules import imei as imei_mod
+from .utils import imei as imei_util
 from .utils import qcn as qcn_mod
 from .utils import nvchecksum as nvchecksum_mod
 
@@ -778,6 +780,100 @@ def _build_root(sub):
     x.set_defaults(func=root_unroot)
 
 
+# ------------------------------------------------------------------ imei
+
+
+def imei_layers(ctx, args):
+    chipset = args.chipset
+    if chipset == "auto":
+        chipset = imei_mod.resolve_chipset(ctx.adb(require=False) if not ctx.runner.dry_run else None, "auto") if args.device else imei_mod.UNKNOWN
+    data = imei_mod.layer_map(chipset)
+    if ctx.json:
+        _out(ctx, data)
+        return
+    print(data["service"])
+    print_table([[b["chipset"], b["transport"], b["storage"], "*" if b["selected"] else ""] for b in data["backends"]],
+                headers=["chipset", "transport", "storage", "sel"])
+
+
+def imei_read(ctx, args):
+    _out(ctx, imei_mod.read(ctx.adb(), chipset=args.chipset))
+
+
+def imei_plan_write(ctx, args):
+    dev = None if args.chipset != "auto" else ctx.adb()
+    _out(ctx, imei_mod.plan_write(dev, args.imei, chipset=args.chipset, sim=args.sim))
+
+
+def imei_decode(ctx, args):
+    raw = bytes.fromhex(args.hex.replace(" ", ""))
+    value = imei_util.decode_nv_imei(raw)
+    _out(ctx, {"hex": raw.hex(), "imei": value, "valid": imei_util.is_valid(value) if value else False})
+
+
+def imei_encode(ctx, args):
+    clean = imei_util.validate(args.imei, allow_14=True)
+    _out(ctx, {"imei": clean, "nv_item": imei_util.NV_UE_IMEI, "nv_value_hex": imei_util.encode_nv_imei(clean).hex(),
+               "diag_write_frame_hex": imei_util.build_diag_imei_write(clean).hex(),
+               "at_write_sim1": imei_util.build_at_egmr(clean, 1)})
+
+
+def imei_check(ctx, args):
+    d = imei_util.normalize(args.imei)
+    if len(d) == 14:
+        _out(ctx, {"input": d, "completed": imei_util.complete(d), "check_digit": imei_util.luhn_check_digit(d)})
+    else:
+        _out(ctx, {"input": d, "valid": imei_util.is_valid(d),
+                   "expected_check_digit": imei_util.luhn_check_digit(d[:14]) if len(d) == 15 else None})
+
+
+def imei_qcn_read(ctx, args):
+    _out(ctx, imei_mod.qcn_read(args.file, item=args.item, storage=args.storage))
+
+
+def imei_qcn_write(ctx, args):
+    _out(ctx, imei_mod.qcn_write(args.file, args.imei, ctx.safety, item=args.item, storage=args.storage, out=args.out))
+
+
+def _build_imei(sub):
+    g = sub.add_parser("imei", help="IMEI service layer: read / decode / plan write across Qualcomm/MTK/Samsung")
+    s = g.add_subparsers(dest="command", metavar="<command>")
+    s.required = True
+    x = s.add_parser("layers", help="show the service-layer map (transport + storage per chipset)")
+    x.add_argument("--chipset", default="auto", choices=["auto", "qualcomm", "mediatek", "samsung", "unknown"])
+    x.add_argument("--device", action="store_true", help="detect the chipset from a connected device")
+    x.set_defaults(func=imei_layers)
+    x = s.add_parser("read", help="read the live IMEI through the chipset layer (Android telephony)")
+    x.add_argument("--chipset", default="auto", choices=["auto", "qualcomm", "mediatek", "samsung", "unknown"])
+    x.set_defaults(func=imei_read)
+    x = s.add_parser("plan-write", help="produce the transport payload for a live IMEI write (does not send it)")
+    x.add_argument("imei")
+    x.add_argument("--chipset", default="auto", choices=["auto", "qualcomm", "mediatek", "samsung"])
+    x.add_argument("--sim", type=int, default=1, choices=[1, 2])
+    x.set_defaults(func=imei_plan_write)
+    x = s.add_parser("check", help="validate / complete an IMEI (Luhn)")
+    x.add_argument("imei")
+    x.set_defaults(func=imei_check)
+    x = s.add_parser("decode", help="decode a packed NV_UE_IMEI (item 550) hex value")
+    x.add_argument("hex")
+    x.set_defaults(func=imei_decode)
+    x = s.add_parser("encode", help="encode an IMEI to NV/DIAG/AT payloads")
+    x.add_argument("imei")
+    x.set_defaults(func=imei_encode)
+    x = s.add_parser("qcn-read", help="read the IMEI from NV item 550 inside a QCN (offline)")
+    x.add_argument("file")
+    x.add_argument("--item", type=int, default=imei_util.NV_UE_IMEI)
+    x.add_argument("--storage")
+    x.set_defaults(func=imei_qcn_read)
+    x = s.add_parser("qcn-write", help="write an IMEI into NV item 550 inside a QCN (offline; token IMEI)")
+    x.add_argument("file")
+    x.add_argument("imei")
+    x.add_argument("--item", type=int, default=imei_util.NV_UE_IMEI)
+    x.add_argument("--storage")
+    x.add_argument("--out", help="write to a new QCN instead of in place")
+    x.set_defaults(func=imei_qcn_write)
+
+
 def cmd_menu(ctx, args):
     from .menu import run_menu
 
@@ -847,6 +943,7 @@ def build_parser() -> argparse.ArgumentParser:
     _build_screen(sub)
     _build_efs(sub)
     _build_root(sub)
+    _build_imei(sub)
     return p
 
 

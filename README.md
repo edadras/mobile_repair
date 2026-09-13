@@ -18,6 +18,7 @@ platform-tools گوگل نیاز دارد؛ هیچ وابستگی خارجی ن�
 | **فلش رام** | `rom` | شناسایی نوع بستهٔ رام و روش فلش؛ فلش پوشهٔ ایمیج‌های fastboot با ترتیب درست و جابه‌جایی خودکار به fastbootd برای پارتیشن‌های داینامیک؛ **استخراج و فلش `payload.bin` / OTA zip** (Full OTA، بدون کتابخانهٔ خارجی)؛ لیست محتویات payload؛ `fastboot update` برای factory zip؛ sideload |
 | **ریکاوری** | `recovery` (`rec`) | sideload؛ wipe cache/data/dalvik؛ فکتوری‌ریست؛ فلش ریکاوری کاستوم و بوت مستقیم به آن؛ push فایل (رام، Magisk) به دستگاه؛ دستورات TWRP (`install`, `wipe`, `backup`, `restore`)؛ وضعیت حالت فعلی دستگاه‌ها |
 | **روت (Magisk)** | `root` | `status`: پیش‌نیازها (ABI، اسلات، `boot` یا `init_boot`، قفل بوت‌لودر، روت موجود، اپ Magisk، fastboot یا Odin)؛ `patch`: پچ ایمیج بوتِ همان بیلد (از فایل، از `payload.bin` رام یا دامپ از دستگاه روت‌شده) با خودِ `boot_patch.sh` مجیسک روی دستگاه و ذخیرهٔ ایمیج اصلی + پچ‌شده + manifest با هش؛ `flash`: ریبوت به بوت‌لودر، رد کردن بوت‌لودر قفل، بررسی هش و مدل، فلش دائم یا بوت موقت (`--temporary`)؛ `install`: پچ + فلش؛ `unroot`: بازگردانی ایمیج اصلی |
+| **IMEI (لایهٔ سرویس)** | `imei` | لایهٔ واحد که بک‌اند چیپست را انتخاب و ترنسپورت و استوریج آن را می‌شناسد (Qualcomm→DIAG→NV/QCN، MTK→META→NVRAM/NVDATA، Samsung→AT→EFS/NV)؛ خواندن IMEI زنده (تلفنی اندروید) و آفلاین از QCN (آیتم NV 550)؛ اعتبارسنجی/تکمیل Luhn؛ رمزگشایی/رمزگذاری مقدار NV و ساخت فریم DIAG و فرمان `AT+EGMR`؛ نوشتن آفلاین IMEI داخل QCN (بازگردانی با QPST)؛ ساخت payload برای نوشتن زنده روی پورت سرویس چیپست |
 | **EFS / NV (هویت مودم)** | `efs` (`nv`) | شناسایی چیپست و پارتیشن‌های موجود؛ **بکاپ/ری‌استور اتمیک** گروه (Qualcomm: modemst1/modemst2/fsg/fsc با مدیریت آینه، MediaTek: nvram/nvdata/nvcfg/protect1/2، Samsung: efs/sec_efs + فایل‌سیستم `/efs`) با محافظ مدل دستگاه و rollback خودکار؛ `validate`: وضعیت erased/آینه و **بررسی ساختار داخلی** (سوپربلاک‌های EFS2 و سنِ نسخهٔ زنده، سوپربلاک ext4 و CRC32C، هدر بکاپ nvram)؛ `check-image`: همان بررسی آفلاین روی دامپ‌ها؛ `rebuild-modemst`: بازسازی modemst1/2 از fsg توسط خودِ مودم (کوالکام)؛ `mtk-rebuild-nvdata`: بازسازی nvdata از بکاپ nvram توسط nvram_daemon (مدیاتک)؛ `samsung-fix-md5`: بازمحاسبهٔ `nv_data.bin.md5`؛ `nv-crc`: CRC-16/X-25 و MD5؛ **QCN**: لیست/استخراج/ویرایش آفلاین آیتم‌های NV و مقایسهٔ دو فایل |
 | **مدیریت اپ** | `apps` (`app`, `pm`) | لیست (third/system/disabled)؛ اطلاعات کامل بسته؛ نصب (split APK)؛ حذف (کاربر ۰ بدون روت)؛ فعال/غیرفعال؛ پاک کردن دیتا؛ force stop؛ استخراج APK؛ بکاپ/ری‌استور دیتای یک اپ؛ اعطا/لغو مجوز؛ **حذف بلوت‌ویر گروهی** از فایل لیست؛ پروسس‌های در حال اجرا |
 | **لاگ و تشخیص** | `logs` (`log`) | logcat (فایل یا زنده با فیلتر)؛ dmesg؛ pstore/last_kmsg (کرش بوت قبلی)؛ bugreport؛ dumpsys؛ ANR/tombstone/dropbox؛ آمار باتری؛ دلیل آخرین بوت/خاموشی؛ **بستهٔ کامل تشخیصی** در یک پوشه |
@@ -147,6 +148,30 @@ mrt screen unlock --pin 1234
 
 مرجع کامل همهٔ دستورها و گزینه‌ها: [`docs/COMMANDS.md`](docs/COMMANDS.md) — نکات ایمنی و سناریوهای تعمیر (بوت‌لوپ، فلش رام، روت، EFS/IMEI): [`docs/REPAIR-GUIDE.md`](docs/REPAIR-GUIDE.md)
 
+<div dir="rtl">
+
+### معماری لایهٔ IMEI
+
+</div>
+
+```
+                     IMEI Service Layer   (mrt imei)
+                             │
+       ┌─────────────────────┼─────────────────────┐
+       ↓                     ↓                     ↓
+   Qualcomm                 MTK                 Samsung
+     DIAG                  META                Service/AT
+       │                     │                     │
+       ↓                     ↓                     ↓
+     NV/QCN            NVRAM/NVDATA               EFS/NV
+```
+
+<div dir="rtl">
+
+خواندن روی adb (لایهٔ تلفنی) و آفلاین از QCN کار می‌کند. نوشتن زنده به پورت اختصاصی چیپست نیاز دارد (DIAG/META/AT) که از adb در دسترس نیست؛ ابزار IMEI را آفلاین داخل QCN می‌نویسد (بازگردانی با QPST) و برای نوشتن زنده payload دقیق را می‌سازد. نوشتن IMEI عملیات مجاز تعمیری برای بازگردانی شمارهٔ *خودِ دستگاه* است؛ شماره همیشه توسط اپراتور داده و با Luhn اعتبارسنجی می‌شود.
+
+</div>
+
 ### چک‌سام‌ها: چه چیزی واقعی است
 
 * `nv_data.bin.md5` سامسونگ یک چک‌سام واقعی و قابل بازمحاسبه است (`efs samsung-fix-md5`).
@@ -186,6 +211,7 @@ to give the maximum access a device permits, from the command line or a bilingua
 | ROM | `rom` | identify a package; flash fastboot image dirs in the right order with automatic fastbootd switch; extract/flash `payload.bin` / full OTA zips (no external libs); `fastboot update`; sideload |
 | Recovery | `recovery` | sideload, wipe, factory reset, flash custom recovery and boot it, push files, TWRP commands, mode status |
 | Root | `root` | `status` (ABI, slot, `boot` vs `init_boot`, bootloader lock, existing root, Magisk app); `patch` the stock image of the installed build (file, OTA payload, or dump from a rooted device) with Magisk's own `boot_patch.sh` on the device; `flash` (refuses a locked bootloader, checks image hash and product; `--temporary` = one-time `fastboot boot`); `install` = patch + flash; `unroot` |
+| IMEI | `imei` | one front end that selects the chipset backend and its transport/storage (Qualcomm→DIAG→NV/QCN, MTK→META→NVRAM/NVDATA, Samsung→AT→EFS/NV); live read (Android telephony) and offline read from a QCN (NV item 550); Luhn validate/complete; NV/DIAG/AT payload encode-decode; offline IMEI write inside a QCN (restore with QPST); a live-write payload builder |
 | EFS / NV | `efs` | chipset detection; atomic backup/restore of the modem identity group (Qualcomm modemst1/modemst2/fsg/fsc with mirror handling, MediaTek nvram/nvdata/nvcfg/protect, Samsung efs + `/efs`) with device guard and rollback; `validate` / `check-image` verify the internal structure (EFS2 superblocks and live age, ext4 superblock + CRC32C, nvram backup header); `rebuild-modemst` (modem rebuilds modemst from fsg) and `mtk-rebuild-nvdata` (nvram_daemon restores nvdata from the nvram backup); Samsung `nv_data.bin.md5` fix; CRC-16/X-25 + MD5; offline QCN list/extract/edit/diff |
 | Apps | `apps` | list, info, install (splits), uninstall (user 0, no root), enable/disable, clear, stop, pull APK, per-app backup/restore, grant/revoke permissions, bulk debloat from a list, processes |
 | Logs | `logs` | logcat, dmesg, pstore/last_kmsg, bugreport, dumpsys, ANR/tombstones/dropbox, battery stats, boot reason, full diagnostics bundle |
