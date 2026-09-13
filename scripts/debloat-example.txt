@@ -1,0 +1,14 @@
+# Example package list for: mrt apps debloat scripts/debloat-example.txt --mode uninstall
+# One package per line, '#' starts a comment. Undo with --mode reinstall.
+com.facebook.appmanager
+com.facebook.services
+com.facebook.system
+com.facebook.katana
+com.netflix.partner.activation
+com.microsoft.skydrive
+com.linkedin.android
+com.google.android.apps.tachyon
+com.miui.analytics
+com.miui.msa.global
+com.samsung.android.app.spage
+com.samsung.android.bixby.agent

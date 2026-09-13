@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mrt"
+version = "1.0.0"
+description = "Mobile Repair Toolkit: full-access Android repair & recovery CLI (ADB / Fastboot / raw partitions / backup / flash / apps / logs)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "mobile_repair contributors" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Environment :: Console",
+  "Topic :: System :: Recovery Tools",
+  "Topic :: Utilities",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+mrt = "mrt.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["mrt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
