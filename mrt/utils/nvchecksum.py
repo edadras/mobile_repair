@@ -12,14 +12,17 @@ What is a *real, recomputable* checksum and what is not:
   stored inside a QCN stream nor inside the ``modemst`` partitions.
 
 * **Qualcomm ``modemst1``/``modemst2``/``fsg``** hold an EFS2 log-structured
-  filesystem with internal page sequence numbers and per-page integrity data.
-  There is no single partition-level checksum a user can recompute; hand-editing
-  the image and "fixing the CRC" is not a real operation. The correct repair is
-  an atomic restore of the mirror group from a known-good dump of the same
-  device (see :mod:`mrt.modules.efs`).
+  filesystem. Its superblock (``EFSSuper``) carries a sequence ``age`` and the
+  geometry but **no CRC field**; the modem keeps integrity through the log and
+  the mirror/golden copies. Structure verification lives in
+  :mod:`mrt.utils.efs2`; the repair is ``efs rebuild-modemst`` (the modem
+  re-creates the mirror from ``fsg``) or an atomic ``efs restore``.
 
-* **MediaTek ``nvram``/``nvdata``** are filesystems too; same story - restore
-  the group atomically, do not try to recompute a partition checksum.
+* **MediaTek ``nvram``/``nvdata``**: ``nvdata`` is ext4 (its metadata checksums
+  are the kernel's), ``nvram`` is the ``nvram_daemon`` backup region
+  (``BackupFlag == 0xFECF``). Structure verification lives in
+  :mod:`mrt.utils.mtknv`; the repair is ``efs mtk-rebuild-nvdata`` (the daemon
+  restores ``nvdata`` from the backup) or an atomic ``efs restore``.
 """
 
 from __future__ import annotations

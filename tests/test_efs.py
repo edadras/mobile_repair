@@ -157,3 +157,159 @@ def test_samsung_fix_md5_local_skips_correct(tmp_path):
     (d / "nv_data.bin.md5").write_text(samsung_md5_hex(b"data"))
     res = efs.samsung_fix_md5(None, ScriptedSafety(assume_yes=True), local_dir=str(d))
     assert res["changed"] == []
+
+
+# ------------------------------------------ structure checks & rebuilds
+
+from .test_efs2_mtknv import make_efs2_image, make_ext4, make_mtk_nvram  # noqa: E402
+
+
+def test_check_images_backup_dir(tmp_path):
+    d = tmp_path / "bk"; d.mkdir()
+    (d / "modemst1.img").write_bytes(make_efs2_image(ages=(1, 3)))
+    (d / "modemst2.img").write_bytes(make_efs2_image(ages=(1, 4)))
+    (d / "fsg.img").write_bytes(make_efs2_image(ages=(1,)))
+    (d / "fsc.img").write_bytes(b"\0" * 512)
+    rep = efs.check_images([str(d)])
+    by = {r["partition"]: r for r in rep["images"]}
+    assert by["modemst1"]["format"] == "efs2" and by["modemst1"]["live"]["age"] == 3
+    assert by["fsc"]["state"] == "blank" and "expected_format" not in by["fsc"]
+    assert rep["qualcomm_mirror"]["newest"] == "modemst2" and rep["ok"]
+    (d / "fsg.img").write_bytes(b"\xff" * 4096)
+    rep = efs.check_images([str(d / "fsg.img"), str(d / "modemst1.img")])
+    assert not rep["ok"] and any("fsg" in p for p in rep["problems"])
+
+
+def test_check_images_mediatek_and_format_mismatch(tmp_path):
+    (tmp_path / "nvdata.img").write_bytes(make_ext4(csum=True))
+    (tmp_path / "nvram.img").write_bytes(make_mtk_nvram())
+    (tmp_path / "nvcfg.img").write_bytes(make_efs2_image())  # wrong format for this name
+    rep = efs.check_images([str(tmp_path / n) for n in ("nvdata.img", "nvram.img", "nvcfg.img")])
+    by = {r["partition"]: r for r in rep["images"]}
+    assert by["nvdata"]["state"] == "ok" and by["nvdata"]["format_matches"]
+    assert rep["mtk_nvram_backup_usable"] is True
+    assert by["nvcfg"]["format_matches"] is False and any("nvcfg" in p for p in rep["problems"])
+
+
+def test_check_images_missing_path():
+    with pytest.raises(MrtError):
+        efs.check_images(["/nonexistent/thing.img"])
+
+
+def test_validate_deep_reports_structure():
+    r = _rooted_with_parts()
+    r.add("shell getprop", "[ro.board.platform]: [kona]\n")
+    r.add("getprop ro.boot.slot_suffix", "\n")
+    for dev in ("sda5", "sda6", "sda7", "sda8"):
+        r.add(f"sha256sum /dev/block/{dev}", "a" * 64 + "  x\n")
+    r.add("head -c 1048576", "0011223344\n")
+    r.add("dd if=/dev/block/sda5", data=make_efs2_image(ages=(1, 2)))
+    r.add("dd if=/dev/block/sda6", data=make_efs2_image(ages=(1, 6)))
+    r.add("dd if=/dev/block/sda7", data=b"\xff" * 4096)
+    rep = efs.validate(AdbDevice(r, "SER"), chipset="qualcomm")
+    by = {p["partition"]: p for p in rep["partitions"]}
+    assert by["modemst2"]["structure"]["live"]["age"] == 6
+    assert by["fsg"]["structure"]["state"] == "blank"
+    assert "structure" not in by["fsc"]
+    assert rep["structure_summary"]["qualcomm_mirror"]["fsg_usable"] is False
+    assert not rep["structure_summary"]["ok"]
+    assert any("dd if=/dev/block/sda5" in c for c in r.joined_calls())
+    r.calls.clear()
+    rep = efs.validate(AdbDevice(r, "SER"), chipset="qualcomm", deep=False)
+    assert "structure_summary" not in rep and not any("dd if=" in c for c in r.joined_calls())
+
+
+def _rebuild_runner(fsg_bytes, state="recovery"):
+    r = _rooted_with_parts()
+    r.add("shell getprop", "[ro.board.platform]: [kona]\n")
+    r.add("getprop ro.boot.slot_suffix", "\n")
+    r.add("get-state", state + "\n")
+    m = make_efs2_image(ages=(1, 2))
+    for dev, data in (("sda5", m), ("sda6", m), ("sda7", fsg_bytes), ("sda8", b"\0" * 512)):
+        r.add(f"dd if=/dev/block/{dev}", data=data)
+        r.add(f"sha256sum /dev/block/{dev}", sha256(data) + f"  /dev/block/{dev}\n")
+    return r
+
+
+def test_rebuild_modemst_zero_fills_after_backup(tmp_path):
+    r = _rebuild_runner(make_efs2_image(ages=(1,)))
+    safety = ScriptedSafety(answers=["REBUILD"])
+    res = efs.rebuild_modemst(AdbDevice(r, "SER"), safety, backup_dir=str(tmp_path / "bk"), reboot=True)
+    assert (tmp_path / "bk" / "efs-manifest.json").exists()
+    assert [w["partition"] for w in res["wiped"]] == ["modemst1", "modemst2"]
+    wipes = [c for c in r.joined_calls() if "dd if=/dev/zero" in c]
+    assert len(wipes) == 2 and "/dev/block/sda5" in wipes[0] and "/dev/block/sda6" in wipes[1]
+    assert not any("/dev/block/sda7" in w for w in wipes)
+    assert res["rebooted"] and any(c.endswith("reboot") for c in r.joined_calls())
+    assert "REBUILD" in safety.prompts[-1] or any("REBUILD" in p for p in safety.prompts)
+
+
+def test_rebuild_modemst_refuses_without_valid_fsg(tmp_path):
+    r = _rebuild_runner(b"\xff" * 4096)
+    with pytest.raises(MrtError, match="fsg"):
+        efs.rebuild_modemst(AdbDevice(r, "SER"), ScriptedSafety(assume_yes=True), backup_dir=str(tmp_path / "bk"))
+    assert not any("dd if=/dev/zero" in c for c in r.joined_calls())
+
+
+def test_rebuild_modemst_aborts_without_token(tmp_path):
+    r = _rebuild_runner(make_efs2_image(ages=(1,)))
+    with pytest.raises(Aborted):
+        efs.rebuild_modemst(AdbDevice(r, "SER"), ScriptedSafety(answers=["yes"]), backup_dir=str(tmp_path / "bk"))
+    assert not any("dd if=/dev/zero" in c for c in r.joined_calls())
+
+
+MTK_LISTING = (
+    "MRT|nvram|/dev/block/mmcblk0p3||5242880\n"
+    "MRT|nvdata|/dev/block/mmcblk0p4||67108864\n"
+    "MRT|nvcfg|/dev/block/mmcblk0p5||33554432\n"
+)
+
+
+def _mtk_runner(nvram_bytes, mounted=True, mke2fs=True):
+    r = FakeRunner()
+    r.add("adb devices -l", "List of devices attached\nSER\tdevice\n")
+    r.add("fastboot devices -l", "")
+    r.add("shell id", "uid=0(root) gid=0(root)\n")
+    r.add("MRT|", MTK_LISTING)
+    r.add("shell getprop", "[ro.board.platform]: [mt6768]\n")
+    r.add("getprop ro.boot.slot_suffix", "\n")
+    nvd = make_ext4(csum=True)
+    for dev, data in (("mmcblk0p3", nvram_bytes), ("mmcblk0p4", nvd), ("mmcblk0p5", nvd)):
+        r.add(f"dd if=/dev/block/{dev}", data=data)
+        r.add(f"sha256sum /dev/block/{dev}", sha256(data) + f"  /dev/block/{dev}\n")
+    mounts = "/dev/block/mmcblk0p4 /nvdata ext4 rw 0 0\n" if mounted else ""
+    state = {"mounted": mounted}
+
+    def umount(argv):
+        if any(a.startswith("umount") or " umount " in a for a in argv):
+            state["mounted"] = False
+            return True
+        return False
+    r.add(umount, "")
+    r.add(lambda argv: any("cat /proc/mounts" in a for a in argv) and state["mounted"], mounts)
+    r.add("cat /proc/mounts", "")
+    r.add("which mke2fs", "/system/bin/mke2fs\n" if mke2fs else "")
+    return r
+
+
+def test_mtk_rebuild_nvdata_mke2fs(tmp_path):
+    r = _mtk_runner(make_mtk_nvram())
+    res = efs.mtk_rebuild_nvdata(AdbDevice(r, "SER"), ScriptedSafety(answers=["REBUILD"]), backup_dir=str(tmp_path / "bk"))
+    assert res["method"] == "mke2fs" and res["unmounted"] == ["/nvdata"]
+    assert any("mke2fs -F -t ext4 -L nvdata /dev/block/mmcblk0p4" in c for c in r.joined_calls())
+    assert not any("dd if=/dev/zero" in c for c in r.joined_calls())
+    assert res["nvram_backup"]["files"] == 2
+
+
+def test_mtk_rebuild_nvdata_zero_fill_fallback(tmp_path):
+    r = _mtk_runner(make_mtk_nvram(), mounted=False, mke2fs=False)
+    res = efs.mtk_rebuild_nvdata(AdbDevice(r, "SER"), ScriptedSafety(answers=["REBUILD"]), backup_dir=str(tmp_path / "bk"))
+    assert res["method"] == "zero-fill"
+    assert any("dd if=/dev/zero of=/dev/block/mmcblk0p4" in c for c in r.joined_calls())
+
+
+def test_mtk_rebuild_nvdata_refuses_without_backup_region(tmp_path):
+    r = _mtk_runner(b"\0" * 65536)
+    with pytest.raises(MrtError, match="nvram backup region"):
+        efs.mtk_rebuild_nvdata(AdbDevice(r, "SER"), ScriptedSafety(assume_yes=True), backup_dir=str(tmp_path / "bk"))
+    assert not any("mke2fs" in c or "dd if=/dev/zero" in c for c in r.joined_calls())

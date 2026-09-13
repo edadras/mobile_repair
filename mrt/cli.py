@@ -28,6 +28,7 @@ from .modules import partitions as part_mod
 from .modules import recovery as recovery_mod
 from .modules import screen as screen_mod
 from .modules import efs as efs_mod
+from .modules import rooting as root_mod
 from .utils import qcn as qcn_mod
 from .utils import nvchecksum as nvchecksum_mod
 
@@ -525,7 +526,19 @@ def efs_restore(ctx, args):
 
 
 def efs_validate(ctx, args):
-    _out(ctx, efs_mod.validate(ctx.adb(), chipset=args.chipset, group=args.group))
+    _out(ctx, efs_mod.validate(ctx.adb(), chipset=args.chipset, group=args.group, deep=not args.no_deep))
+
+
+def efs_check_image(ctx, args):
+    _out(ctx, efs_mod.check_images(args.paths))
+
+
+def efs_rebuild_modemst(ctx, args):
+    _out(ctx, efs_mod.rebuild_modemst(ctx.adb(), ctx.safety, backup_dir=args.backup_dir, reboot=args.reboot))
+
+
+def efs_mtk_rebuild_nvdata(ctx, args):
+    _out(ctx, efs_mod.mtk_rebuild_nvdata(ctx.adb(), ctx.safety, backup_dir=args.backup_dir, reboot=args.reboot))
 
 
 def efs_samsung_fix_md5(ctx, args):
@@ -637,10 +650,22 @@ def _build_efs(sub):
     x.add_argument("--partitions", help="comma separated subset to restore")
     x.add_argument("--no-rollback", action="store_true", help="do not dump current content before writing")
     x.set_defaults(func=efs_restore)
-    x = s.add_parser("validate", help="check erased/mirror state and Samsung md5 sidecars (root)")
+    x = s.add_parser("validate", help="check erased/mirror state, EFS2/ext4/nvram structure and Samsung md5 sidecars (root)")
     x.add_argument("--group", default="modem-nv")
     x.add_argument("--chipset", default="auto", choices=["auto", "qualcomm", "mediatek", "samsung", "unknown"])
+    x.add_argument("--no-deep", action="store_true", help="skip dumping partitions for the internal structure check")
     x.set_defaults(func=efs_validate)
+    x = s.add_parser("check-image", help="offline structure check of dumped modemst/fsg (EFS2), nvdata (ext4), nvram images")
+    x.add_argument("paths", nargs="+", help="image files and/or mrt EFS backup directories")
+    x.set_defaults(func=efs_check_image)
+    x = s.add_parser("rebuild-modemst", help="Qualcomm: erase modemst1/2 so the modem rebuilds them from fsg (backup + fsg check first, root)")
+    x.add_argument("--backup-dir", help="where to store the mandatory pre-rebuild backup")
+    x.add_argument("--reboot", action="store_true", help="reboot immediately after erasing")
+    x.set_defaults(func=efs_rebuild_modemst)
+    x = s.add_parser("mtk-rebuild-nvdata", help="MediaTek: empty nvdata so nvram_daemon restores it from the nvram backup (backup + check first, root)")
+    x.add_argument("--backup-dir", help="where to store the mandatory pre-rebuild backup")
+    x.add_argument("--reboot", action="store_true", help="reboot immediately after emptying nvdata")
+    x.set_defaults(func=efs_mtk_rebuild_nvdata)
     x = s.add_parser("samsung-fix-md5", help="recompute Samsung nv_data.bin.md5 sidecars")
     x.add_argument("--efs-dir", help="device /efs dir (auto-detected)")
     x.add_argument("--local", help="fix a pulled copy in this local directory instead of the device")
@@ -678,6 +703,79 @@ def _build_efs(sub):
     x.add_argument("b")
     x.set_defaults(func=efs_qcn_diff)
 
+
+
+# ------------------------------------------------------------------ root
+
+
+def root_status(ctx, args):
+    _out(ctx, root_mod.status(ctx.adb()))
+
+
+def _root_patch_kw(args):
+    return dict(boot_image=args.boot_image, payload=args.payload, target=args.target,
+                keep_verity=not args.no_keep_verity, keep_forceencrypt=not args.no_keep_forceencrypt,
+                patch_vbmeta=args.patch_vbmeta, recovery_mode=args.recovery_mode, install_app=args.install_app)
+
+
+def root_patch(ctx, args):
+    out_dir = args.out or os.path.join("backups", "root-" + time.strftime("%Y%m%d-%H%M%S"))
+    _out(ctx, root_mod.patch(ctx.adb(), ctx.safety, args.magisk, out_dir, **_root_patch_kw(args)))
+
+
+def root_flash(ctx, args):
+    _out(ctx, root_mod.flash(ctx.runner, ctx.serial, args.source, ctx.safety, target=args.target,
+                             temporary=args.temporary, slot=args.slot, reboot=not args.no_reboot))
+
+
+def root_install(ctx, args):
+    out_dir = args.out or os.path.join("backups", "root-" + time.strftime("%Y%m%d-%H%M%S"))
+    _out(ctx, root_mod.install(ctx.runner, ctx.adb(), ctx.safety, args.magisk, out_dir,
+                               temporary=args.temporary, slot=args.slot, **_root_patch_kw(args)))
+
+
+def root_unroot(ctx, args):
+    _out(ctx, root_mod.unroot(ctx.runner, ctx.serial, args.source, ctx.safety, slot=args.slot, reboot=not args.no_reboot))
+
+
+def _add_patch_args(x):
+    x.add_argument("--magisk", required=True, metavar="APK", help="Magisk APK on the host (from github.com/topjohnwu/Magisk releases)")
+    x.add_argument("--boot-image", help="stock boot/init_boot image of the INSTALLED firmware build")
+    x.add_argument("--payload", help="OTA zip or payload.bin of the installed build to take the stock image from")
+    x.add_argument("--target", default="auto", choices=["auto", "boot", "init_boot"], help="partition to patch (auto: init_boot if it exists)")
+    x.add_argument("--out", help="output dir for stock + patched image and root-manifest.json (default backups/root-<timestamp>)")
+    x.add_argument("--no-keep-verity", action="store_true", help="KEEPVERITY=false (only with a matching vbmeta setup)")
+    x.add_argument("--no-keep-forceencrypt", action="store_true", help="KEEPFORCEENCRYPT=false")
+    x.add_argument("--patch-vbmeta", action="store_true", help="PATCHVBMETAFLAG=true (Samsung / some MediaTek)")
+    x.add_argument("--recovery-mode", action="store_true", help="RECOVERYMODE=true (Magisk in recovery, e.g. Samsung)")
+    x.add_argument("--install-app", action="store_true", help="also install the Magisk app on the device")
+
+
+def _build_root(sub):
+    g = sub.add_parser("root", help="root the device with Magisk (status / patch / flash / install / unroot)")
+    s = g.add_subparsers(dest="command", metavar="<command>")
+    s.required = True
+    s.add_parser("status", help="prerequisites: ABI, slot, boot vs init_boot, bootloader lock, existing root, Magisk app").set_defaults(func=root_status)
+    x = s.add_parser("patch", help="patch the stock boot/init_boot image with Magisk on the device and pull it back")
+    _add_patch_args(x)
+    x.set_defaults(func=root_patch)
+    x = s.add_parser("flash", help="reboot to bootloader and flash (or temporarily boot) the patched image")
+    x.add_argument("source", help="root dir from 'root patch' (with root-manifest.json) or a patched image file")
+    x.add_argument("--target", choices=["boot", "init_boot"], help="override the partition")
+    x.add_argument("--temporary", action="store_true", help="'fastboot boot' it once instead of flashing")
+    x.add_argument("--slot", choices=["a", "b", "all"])
+    x.add_argument("--no-reboot", action="store_true", help="stay in fastboot afterwards")
+    x.set_defaults(func=root_flash)
+    x = s.add_parser("install", help="patch + flash in one go")
+    _add_patch_args(x)
+    x.add_argument("--temporary", action="store_true", help="'fastboot boot' the patched image instead of flashing")
+    x.add_argument("--slot", choices=["a", "b", "all"])
+    x.set_defaults(func=root_install)
+    x = s.add_parser("unroot", help="flash the saved stock image back")
+    x.add_argument("source", help="root dir from 'root patch' or the stock image file")
+    x.add_argument("--slot", choices=["a", "b", "all"])
+    x.add_argument("--no-reboot", action="store_true")
+    x.set_defaults(func=root_unroot)
 
 
 def cmd_menu(ctx, args):
@@ -748,6 +846,7 @@ def build_parser() -> argparse.ArgumentParser:
     _build_logs(sub)
     _build_screen(sub)
     _build_efs(sub)
+    _build_root(sub)
     return p
 
 
