@@ -79,6 +79,15 @@ MENU = [
         ("Pull APK", "استخراج APK", "apps pull {package}"),
         ("Debloat from list file", "حذف بلوت‌ویر از فایل لیست", "apps debloat {path}"),
     ]),
+    ("Root (Magisk)", "روت (Magisk)", [
+        ("Root status / prerequisites", "وضعیت روت و پیش‌نیازها", "root status"),
+        ("Patch boot image with Magisk", "پچ ایمیج بوت با Magisk", "root patch --magisk {path} --boot-image {image}"),
+        ("Patch from OTA payload", "پچ از payload رام", "root patch --magisk {path} --payload {image}"),
+        ("Flash patched image", "فلش ایمیج پچ‌شده", "root flash {directory}"),
+        ("Temporary root (boot once)", "روت موقت (بوت یک‌باره)", "root flash {directory} --temporary"),
+        ("Patch + flash (install)", "پچ و فلش (نصب کامل)", "root install --magisk {path} --boot-image {image}"),
+        ("Unroot (restore stock boot)", "حذف روت (بازگردانی بوت اصلی)", "root unroot {directory}"),
+    ]),
     ("EFS / NV (IMEI, calibration)", "EFS / NV (آی‌ام‌ای، کالیبراسیون)", [
         ("Detect chipset & partitions", "شناسایی چیپست و پارتیشن‌ها", "efs detect"),
         ("Backup modem NV (atomic)", "بکاپ اتمیک EFS/NV", "efs backup {directory}"),

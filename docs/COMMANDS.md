@@ -133,6 +133,20 @@ Exit codes: 0 ok · 1 generic · 2 tool not found · 3 device not found · 4 com
 
 `~/.mrt/logs/mrt-YYYYMMDD-HHMMSS.log` (text) and `.jsonl` (one JSON object per event: `command` with argv/rc/duration/stderr, `info`, `warn`, `error`, confirmations and their outcome). Use `--log-dir` or `MRT_LOG_DIR` to change the location.
 
+## `mrt root` — root with Magisk
+
+Host-driven version of what the Magisk app does. Needs the Magisk APK on the host (download it from the official Magisk releases), an **unlocked bootloader** for the flash step (`mrt fastboot unlock`, erases data) and the stock `boot`/`init_boot` image of the **installed** firmware build.
+
+| command | description |
+|---|---|
+| `status` | prerequisites: ABI, A/B slot, target partition (`init_boot` on Android 13+ GKI devices, else `boot`), bootloader lock state (from `ro.boot.verifiedbootstate` / `ro.boot.flash.locked` / `ro.boot.vbmeta.device_state`), existing root, Magisk app presence, and whether the flash step goes through fastboot or (Samsung) Odin |
+| `patch --magisk APK (--boot-image IMG \| --payload OTA) [--target auto\|boot\|init_boot] [--out DIR] [--no-keep-verity] [--no-keep-forceencrypt] [--patch-vbmeta] [--recovery-mode] [--install-app]` | copies the stock image (from the file, extracted from an OTA `payload.bin`, or dumped from an already-rooted device), pushes Magisk's own `magiskboot`/`magiskinit`/`boot_patch.sh` (extracted from the APK for the device ABI) to `/data/local/tmp`, runs `boot_patch.sh` on the device with the same env vars the app uses and pulls `new-boot.img` back as `magisk_patched-<target>.img`. Writes `stock-<target>.img` and `root-manifest.json` (sha256 of both images, device fingerprint, Magisk version, patch log) into `DIR` |
+| `flash DIR\|IMAGE [--target boot\|init_boot] [--temporary] [--slot a\|b\|all] [--no-reboot]` | reboots to the bootloader if needed, refuses when `unlocked: no`, verifies the image sha256 against the manifest and the bootloader `product` against the manifest (`MISMATCH` token to override), then `fastboot flash <target>` (token = partition name) and reboots. `--temporary` does `fastboot boot` instead: root for one boot only (finish with "Direct Install" in the Magisk app) |
+| `install --magisk APK ... [--temporary] [--slot S]` | `patch` followed by `flash` |
+| `unroot DIR\|IMAGE [--slot S] [--no-reboot]` | flashes the saved stock image back |
+
+Samsung: `patch` works (use `--recovery-mode` / `--patch-vbmeta` as the Magisk docs describe for the model), but the flash step must be done with Odin (AP tar) — `flash` refuses on Samsung.
+
 ## `mrt efs` (alias `nv`) — EFS / NV: IMEI, MAC, RF calibration
 
 These partitions carry radio identity. Handle them as one atomic group; back up before touching anything. Partition operations need root.

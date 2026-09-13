@@ -51,7 +51,24 @@ mrt fastboot boot twrp.img          # test first without flashing
 mrt recovery flash twrp.img --boot  # then flash
 mrt recovery push Magisk.apk        # then install from TWRP, or:
 mrt recovery twrp install /sdcard/Magisk.zip
+
+# root without TWRP (Magisk boot-image patching, like the app but from the host):
+mrt root status                                                   # unlocked? boot or init_boot? ABI?
+mrt fastboot unlock                                               # once; erases all data
+mrt root patch --magisk Magisk-v27.0.apk --boot-image init_boot.img   # stock image of the INSTALLED build
+mrt root flash backups/root-<time> --temporary                    # test once without flashing
+mrt root flash backups/root-<time>                                # flash for good, then open the Magisk app
+mrt root unroot backups/root-<time>                               # back to stock
 ```
+
+<div dir="rtl">
+
+* ایمیج بوت باید دقیقاً از همان بیلدِ نصب‌شده باشد (از فایل رام یا با `--payload` از OTA). ایمیج بیلد دیگر = بوت‌لوپ.
+* روی دستگاه‌های Android 13+ با پارتیشن `init_boot`، همان را پچ کنید (`root status` خودش تشخیص می‌دهد).
+* سامسونگ fastboot ندارد: `root patch` ایمیج پچ‌شده را می‌سازد، اما فلش باید با Odin (داخل AP tar) انجام شود.
+* بوت‌لودر قفل باشد، ایمیج پچ‌شده بوت نمی‌شود؛ `root flash` در این حالت کار را متوقف می‌کند.
+
+</div>
 
 <div dir="rtl">
 
